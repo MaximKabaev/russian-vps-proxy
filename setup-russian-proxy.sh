@@ -24,9 +24,33 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
 # Get user inputs
 read -p "Enter your domain name (e.g., lekar-apteka.ru): " DOMAIN
+# Trim whitespace from domain
+DOMAIN=$(echo "$DOMAIN" | xargs)
+
+# Validate domain
+if [ -z "$DOMAIN" ]; then
+    print_error "Domain cannot be empty"
+    exit 1
+fi
+
+# Confirm domain is correct
+echo
+print_warning "You entered domain: '$DOMAIN'"
+read -p "Is this correct? (y/n): " CONFIRM
+if [ "$CONFIRM" != "y" ]; then
+    print_info "Exiting. Please run the script again with correct domain."
+    exit 1
+fi
+
 read -p "Enter your origin server domain or IP: " ORIGIN_HOST
+ORIGIN_HOST=$(echo "$ORIGIN_HOST" | xargs)
+
 read -p "Use HTTPS to connect to origin? (y/n, default y): " USE_HTTPS
 USE_HTTPS=${USE_HTTPS:-y}
 
@@ -38,6 +62,19 @@ fi
 
 print_info "Setting up reverse proxy: $DOMAIN -> $ORIGIN_URL"
 print_info "Your origin nginx will handle /api/ and /products/ routing"
+
+# Check for existing configuration
+if [ -f "/etc/nginx/sites-available/$DOMAIN" ]; then
+    print_warning "Configuration for $DOMAIN already exists"
+    read -p "Do you want to overwrite it? (y/n): " OVERWRITE
+    if [ "$OVERWRITE" != "y" ]; then
+        print_info "Exiting without changes"
+        exit 0
+    fi
+    print_info "Removing existing configuration..."
+    sudo rm -f /etc/nginx/sites-available/$DOMAIN
+    sudo rm -f /etc/nginx/sites-enabled/$DOMAIN
+fi
 
 # Update system
 print_info "Updating system packages..."
@@ -169,10 +206,18 @@ server {
 }
 EOF
 
+# Clean up any broken symlinks first
+print_info "Cleaning up broken nginx symlinks..."
+sudo find /etc/nginx/sites-enabled/ -type l -exec test ! -e {} \; -delete
+
 # Enable the site
-print_info "Enabling site configuration..."
-sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
+print_info "Enabling site configuration for $DOMAIN..."
+sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
 sudo rm -f /etc/nginx/sites-enabled/default
+
+# List enabled sites for debugging
+print_info "Currently enabled sites:"
+ls -la /etc/nginx/sites-enabled/
 
 # Test nginx configuration
 print_info "Testing nginx configuration..."
@@ -180,6 +225,8 @@ if sudo nginx -t; then
     print_success "Nginx configuration is valid"
 else
     print_error "Nginx configuration test failed"
+    print_info "Checking nginx error details..."
+    sudo nginx -T 2>&1 | grep -A 5 -B 5 "emerg\|error" || true
     exit 1
 fi
 
