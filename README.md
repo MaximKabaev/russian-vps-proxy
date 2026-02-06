@@ -40,10 +40,10 @@ Russian Users → Russian VPS (Nginx Proxy) → Your Origin Server → Backend/F
 
 ## Installation
 
-### 1. On Russian VPS
+### Step 1: Setup Russian VPS (Proxy Server)
 
 ```bash
-# Download the script
+# Download the proxy setup script
 wget https://raw.githubusercontent.com/MaximKabaev/russian-vps-proxy/main/setup-russian-proxy.sh
 
 # Make executable
@@ -53,35 +53,66 @@ chmod +x setup-russian-proxy.sh
 ./setup-russian-proxy.sh
 ```
 
-### 2. Follow the prompts
-
+Follow the prompts:
 ```
 Enter your domain name (e.g., lekar-apteka.ru): example.com
-Enter your origin server domain or IP: origin-server.com
+Enter your origin server domain or IP: 192.168.1.100
 Use HTTPS to connect to origin? (y/n, default y): y
 ```
 
-### 3. Update DNS
+### Step 2: Configure Origin Server
 
-Point your domain to the Russian VPS IP address.
+```bash
+# Download the origin server setup script
+wget https://raw.githubusercontent.com/MaximKabaev/russian-vps-proxy/main/setup-origin-server.sh
 
-### 4. Secure Origin Server
+# Make executable
+chmod +x setup-origin-server.sh
 
-On your origin server, whitelist only the Russian VPS IP:
+# Run the setup on your origin server
+./setup-origin-server.sh
+```
+
+Follow the prompts:
+```
+Enter your domain name: example.com
+Enter the Russian VPS IP to whitelist: 45.144.222.25
+Enter backend port (default 3001): 3001
+Enter frontend port (default 3000): 3000
+```
+
+### Step 3: Update DNS
+
+Point your domain to the Russian VPS IP address (NOT the origin server).
+
+### Alternative: Manual Origin Configuration
+
+If you prefer manual configuration, add this to your origin nginx:
 
 ```nginx
-# In your origin server's nginx config
-geo $proxy_allowed {
-    default 0;
-    YOUR_RUSSIAN_VPS_IP 1;  # Replace with actual IP
-}
-
 server {
-    if ($proxy_allowed = 0) {
-        return 403;
+    listen 443 ssl;
+    server_name example.com;
+
+    # SSL certificates
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    # Whitelist Russian proxy only
+    allow YOUR_RUSSIAN_VPS_IP;
+    deny all;
+
+    # Health check endpoint (open to all)
+    location /health {
+        allow all;
+        proxy_pass http://localhost:3001;
     }
 
-    # Your existing configuration...
+    # Your application routes...
+    location / {
+        proxy_pass http://localhost:3000;
+        # proxy settings...
+    }
 }
 ```
 
