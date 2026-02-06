@@ -92,24 +92,19 @@ sudo chown www-data:www-data /var/cache/nginx
 # Create nginx configuration
 print_info "Creating nginx configuration..."
 sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null <<EOF
-# Cache configuration
 proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=static_cache:10m max_size=1g inactive=7d use_temp_path=off;
-
-# Rate limiting
 limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;
 
 server {
     listen 80;
     server_name $DOMAIN www.$DOMAIN;
 
-    # Let's Encrypt challenge
     location /.well-known/acme-challenge/ {
         root /var/www/html;
     }
 
-    # Redirect to HTTPS
     location / {
-        return 301 https://\$server_name\$request_uri;
+        return 301 https://\$host\$request_uri;
     }
 }
 
@@ -117,24 +112,17 @@ server {
     listen 443 ssl http2;
     server_name $DOMAIN www.$DOMAIN;
 
-    # SSL certificates (will be added by certbot)
-    # ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # SSL configuration
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers off;
-
-    # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    # Rate limiting
     limit_req zone=general burst=20 nodelay;
 
-    # Proxy settings
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -144,21 +132,16 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
 
-    # Timeouts
     proxy_connect_timeout 60s;
     proxy_send_timeout 60s;
     proxy_read_timeout 60s;
 
-    # API routes - no caching, pass to origin server
-    # Your origin nginx will route this to localhost:3001
     location /api/ {
         proxy_pass $ORIGIN_URL;
         proxy_no_cache 1;
         proxy_cache_bypass 1;
     }
 
-    # Product images with caching
-    # Your origin nginx will route this to localhost:3001
     location /products/ {
         proxy_pass $ORIGIN_URL;
         proxy_cache static_cache;
@@ -168,37 +151,27 @@ server {
         expires 7d;
     }
 
-    # Frontend and static assets
-    # Your origin nginx will route this to localhost:3000
     location / {
         proxy_pass $ORIGIN_URL;
 
-        # Cache static assets
         location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
             proxy_pass $ORIGIN_URL;
             proxy_cache static_cache;
             proxy_cache_valid 200 7d;
             proxy_cache_valid 404 1h;
-            proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
-            proxy_cache_background_update on;
-            proxy_cache_lock on;
             add_header X-Cache-Status \$upstream_cache_status;
             expires 7d;
-            add_header Cache-Control "public, immutable";
         }
     }
 
-    # Health check endpoint (local)
     location /proxy-health {
         access_log off;
         add_header Content-Type text/plain;
         return 200 "Proxy OK";
     }
 
-    # Increase body size for uploads
     client_max_body_size 10M;
 
-    # Gzip compression
     gzip on;
     gzip_vary on;
     gzip_min_length 1024;
