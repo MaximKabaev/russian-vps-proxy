@@ -62,6 +62,7 @@ fi
 
 print_info "Setting up reverse proxy: $DOMAIN -> $ORIGIN_URL"
 print_info "Your origin nginx will handle /api/ and /products/ routing"
+print_info "Compatible with Yandex integration endpoints (/api/nomenclature, /api/order, etc.)"
 
 # Check for existing configuration
 if [ -f "/etc/nginx/sites-available/$DOMAIN" ]; then
@@ -97,7 +98,7 @@ limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;
 
 server {
     listen 80;
-    server_name $DOMAIN www.$DOMAIN;
+    server_name $DOMAIN;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -145,7 +146,7 @@ print_success "Nginx reloaded"
 
 # Setup SSL with Let's Encrypt
 print_info "Setting up SSL certificate with Let's Encrypt..."
-if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect; then
+if sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect; then
     print_success "SSL certificate obtained successfully"
 
     # Now create the full configuration with SSL and all proxy settings
@@ -156,7 +157,7 @@ limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;
 
 server {
     listen 80;
-    server_name $DOMAIN www.$DOMAIN;
+    server_name $DOMAIN;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -169,7 +170,7 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name $DOMAIN www.$DOMAIN;
+    server_name $DOMAIN;
 
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
@@ -244,7 +245,7 @@ EOF
 else
     print_error "Failed to obtain SSL certificate"
     print_info "You can try running certbot manually later:"
-    print_info "  sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
+    print_info "  sudo certbot --nginx -d $DOMAIN"
 fi
 
 # Setup firewall
