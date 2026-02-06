@@ -89,9 +89,68 @@ sudo apt-get install -y nginx certbot python3-certbot-nginx
 sudo mkdir -p /var/cache/nginx
 sudo chown www-data:www-data /var/cache/nginx
 
-# Create nginx configuration
-print_info "Creating nginx configuration..."
+# Create initial nginx configuration (HTTP only for certbot)
+print_info "Creating initial nginx configuration..."
 sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null <<EOF
+proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=static_cache:10m max_size=1g inactive=7d use_temp_path=off;
+limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;
+
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    # Temporary proxy configuration (will be updated by certbot)
+    location / {
+        proxy_pass $ORIGIN_URL;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+# Clean up any broken symlinks first
+print_info "Cleaning up broken nginx symlinks..."
+sudo find /etc/nginx/sites-enabled/ -type l -exec test ! -e {} \; -delete
+
+# Enable the site
+print_info "Enabling site configuration for $DOMAIN..."
+sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# List enabled sites for debugging
+print_info "Currently enabled sites:"
+ls -la /etc/nginx/sites-enabled/
+
+# Test nginx configuration
+print_info "Testing nginx configuration..."
+if sudo nginx -t; then
+    print_success "Nginx configuration is valid"
+else
+    print_error "Nginx configuration test failed"
+    print_info "Checking nginx error details..."
+    sudo nginx -T 2>&1 | grep -A 5 -B 5 "emerg\|error" || true
+    exit 1
+fi
+
+# Reload nginx
+sudo systemctl reload nginx
+print_success "Nginx reloaded"
+
+# Setup SSL with Let's Encrypt
+print_info "Setting up SSL certificate with Let's Encrypt..."
+if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect; then
+    print_success "SSL certificate obtained successfully"
+
+    # Now create the full configuration with SSL and all proxy settings
+    print_info "Updating nginx configuration with full proxy settings..."
+    sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null <<EOF
 proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=static_cache:10m max_size=1g inactive=7d use_temp_path=off;
 limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;
 
@@ -179,37 +238,14 @@ server {
 }
 EOF
 
-# Clean up any broken symlinks first
-print_info "Cleaning up broken nginx symlinks..."
-sudo find /etc/nginx/sites-enabled/ -type l -exec test ! -e {} \; -delete
-
-# Enable the site
-print_info "Enabling site configuration for $DOMAIN..."
-sudo ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# List enabled sites for debugging
-print_info "Currently enabled sites:"
-ls -la /etc/nginx/sites-enabled/
-
-# Test nginx configuration
-print_info "Testing nginx configuration..."
-if sudo nginx -t; then
-    print_success "Nginx configuration is valid"
+    # Reload nginx with new configuration
+    sudo nginx -t && sudo systemctl reload nginx
+    print_success "Full proxy configuration applied"
 else
-    print_error "Nginx configuration test failed"
-    print_info "Checking nginx error details..."
-    sudo nginx -T 2>&1 | grep -A 5 -B 5 "emerg\|error" || true
-    exit 1
+    print_error "Failed to obtain SSL certificate"
+    print_info "You can try running certbot manually later:"
+    print_info "  sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
 fi
-
-# Reload nginx
-sudo systemctl reload nginx
-print_success "Nginx reloaded"
-
-# Setup SSL with Let's Encrypt
-print_info "Setting up SSL certificate with Let's Encrypt..."
-sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect
 
 # Setup firewall
 print_info "Configuring firewall..."
